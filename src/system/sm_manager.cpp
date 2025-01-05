@@ -84,7 +84,30 @@ void SmManager::drop_db(const std::string& db_name) {
  * @description: 打开数据库，找到数据库对应的文件夹，并加载数据库元数据和相关文件
  * @param {string&} db_name 数据库名称，与文件夹同名
  */
-void SmManager::open_db(const std::string& db_name) {}
+void SmManager::open_db(const std::string& db_name) {
+    if (!is_dir(db_name)) {
+        throw DatabaseNotFoundError(db_name);
+    }
+    if (chdir(db_name.c_str()) < 0) {
+        throw UnixError();
+    }
+
+    std::ifstream ifs(DB_META_NAME);
+    ifs >> db_;
+
+    // Open all record files and index files
+    for (auto& entry : db_.tabs_) {
+        auto& tab = entry.second;
+        fhs_.emplace(tab.name, rm_manager_->open_file(tab.name));
+
+        for (auto& col : tab.cols) {
+            if (col.index) {
+                std::vector<ColMeta> index_cols = {col};
+                ihs_.emplace(tab.name + "." + col.name, ix_manager_->open_index(tab.name, index_cols));
+            }
+        }
+    }
+}
 
 /**
  * @description: 把数据库相关的元数据刷入磁盘中
@@ -98,7 +121,30 @@ void SmManager::flush_meta() {
 /**
  * @description: 关闭数据库并把数据落盘
  */
-void SmManager::close_db() {}
+void SmManager::close_db() {
+    std::ofstream ofs(DB_META_NAME);
+    ofs << db_;
+
+    // Clear database meta
+    db_.name_.clear();
+    db_.tabs_.clear();
+
+    // Close record files
+    for (auto& entry : fhs_) {
+        rm_manager_->close_file(entry.second.get());
+    }
+    fhs_.clear();
+
+    // Close index files
+    for (auto& entry : ihs_) {
+        ix_manager_->close_index(entry.second.get());
+    }
+    ihs_.clear();
+
+    if (chdir("..") < 0) {
+        throw UnixError();
+    }
+}
 
 /**
  * @description: 显示所有的表,通过测试需要将其结果写入到output.txt,详情看题目文档
@@ -183,7 +229,35 @@ void SmManager::create_table(const std::string& tab_name, const std::vector<ColD
  * @param {string&} tab_name 表的名称
  * @param {Context*} context
  */
-void SmManager::drop_table(const std::string& tab_name, Context* context) {}
+void SmManager::drop_table(const std::string& tab_name, Context* context) {
+    TabMeta& tab = db_.get_table(tab_name);
+
+    // Drop all indexes on this table
+    for (auto& col : tab.cols) {
+        if (col.index) {
+            std::vector<ColMeta> index_cols = {col};
+            // First close the index file
+            std::string index_name = tab_name + "." + col.name;
+            auto ih = ihs_.find(index_name);
+            if (ih != ihs_.end()) {
+                ix_manager_->close_index(ih->second.get());
+                ihs_.erase(ih);
+            }
+            // Then destroy the index file
+            ix_manager_->destroy_index(tab_name, index_cols);
+        }
+    }
+
+    // Close and destroy record file
+    auto file_handle = fhs_.at(tab_name).get();
+    rm_manager_->close_file(file_handle);
+    fhs_.erase(tab_name);
+    rm_manager_->destroy_file(tab_name);
+
+    // Remove table meta from db meta
+    db_.tabs_.erase(tab_name);
+    flush_meta();
+}
 
 /**
  * @description: 创建索引
@@ -211,7 +285,7 @@ void SmManager::create_index(const std::string& tab_name, const std::vector<std:
 
     ix_manager_->create_index(tab_name, cols);
 
-    auto ih = ix_manager_->open_index(tab_name, cols);
+    std::unique_ptr<IxIndexHandle> ih(ix_manager_->open_index(tab_name, cols));
     auto file_handle = fhs_.at(tab_name).get();
 
     for (RmScan scan(file_handle); !scan.is_end(); scan.next()) {
@@ -225,6 +299,12 @@ void SmManager::create_index(const std::string& tab_name, const std::vector<std:
         ih->insert_entry(key, scan.rid(), context->txn_);
         delete[] key;
     }
+
+    std::string index_name = tab_name;
+    for (const auto& col : cols) {
+        index_name += "." + col.name;
+    }
+    ihs_.emplace(index_name, std::move(ih));
 
     for (auto& col : tab.cols) {
         for (const auto& col_name : col_names) {
@@ -244,7 +324,21 @@ void SmManager::create_index(const std::string& tab_name, const std::vector<std:
  * @param {vector<string>&} col_names 索引包含的字段名称
  * @param {Context*} context
  */
-void SmManager::drop_index(const std::string& tab_name, const std::vector<std::string>& col_names, Context* context) {}
+void SmManager::drop_index(const std::string& tab_name, const std::vector<std::string>& col_names, Context* context) {
+    TabMeta& tab = db_.get_table(tab_name);
+    std::vector<ColMeta> cols;
+
+    // Get column metadata
+    for (const auto& col_name : col_names) {
+        auto col = tab.get_col(col_name);
+        if (!col->index) {
+            throw IndexNotFoundError(tab_name, col_names);
+        }
+        cols.push_back(*col);
+    }
+
+    drop_index(tab_name, cols, context);
+}
 
 /**
  * @description: 删除索引
@@ -252,4 +346,50 @@ void SmManager::drop_index(const std::string& tab_name, const std::vector<std::s
  * @param {vector<ColMeta>&} 索引包含的字段元数据
  * @param {Context*} context
  */
-void SmManager::drop_index(const std::string& tab_name, const std::vector<ColMeta>& cols, Context* context) {}
+void SmManager::drop_index(const std::string& tab_name, const std::vector<ColMeta>& cols, Context* context) {
+    TabMeta& tab = db_.get_table(tab_name);
+
+    // Remove index handle and close file
+    std::string index_name = tab_name;
+    for (const auto& col : cols) {
+        index_name += "." + col.name;
+        auto ih = ihs_.find(index_name);
+        if (ih != ihs_.end()) {
+            ix_manager_->close_index(ih->second.get());
+            ihs_.erase(ih);
+        }
+    }
+
+    // Destroy index file
+    ix_manager_->destroy_index(tab_name, cols);
+
+    // Update index flag and meta
+    for (auto& col : tab.cols) {
+        for (const auto& idx_col : cols) {
+            if (col.name == idx_col.name) {
+                col.index = false;
+                break;
+            }
+        }
+    }
+
+    // Remove index meta from table meta
+    auto& indexes = tab.indexes;
+    for (auto it = indexes.begin(); it != indexes.end(); it++) {
+        if (it->col_num == cols.size()) {
+            bool match = true;
+            for (size_t i = 0; i < cols.size(); i++) {
+                if (it->cols[i].name != cols[i].name) {
+                    match = false;
+                    break;
+                }
+            }
+            if (match) {
+                indexes.erase(it);
+                break;
+            }
+        }
+    }
+
+    flush_meta();
+}
