@@ -161,6 +161,9 @@ class IxNodeHandle {
 class IxIndexHandle {
     friend class IxScan;
     friend class IxManager;
+#ifndef NDEBUG
+    friend void print_tree(IxIndexHandle *ih, const std::string &msg);
+#endif
 
    private:
     DiskManager *disk_manager_;
