@@ -82,9 +82,9 @@ def run(test_file):
         if value != 0:
             match = False
             if value > 0:
-                print('In basic query test'+str(test_index),'Mismatch,your answer lack items')
+                print('In basic query test'+str(test_index),f'Mismatch,your answer lack items, and it\'s {key!r}')
             else :
-                print('In basic query test'+str(test_index),'Mismatch,your answer has redundant items')
+                print('In basic query test'+str(test_index),f'Mismatch,your answer has redundant items, and it\'s {key!r}')
     if match :
         score += SCORES[test_index-1]
     # close server
