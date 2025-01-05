@@ -233,7 +233,7 @@ IxIndexHandle::IxIndexHandle(DiskManager *disk_manager, BufferPoolManager *buffe
  * @param key 要查找的目标key值
  * @param operation 查找到目标键值对后要进行的操作类型
  * @param transaction 事务参数，如果不需要则默认传入nullptr
- * @return [leaf node] and [root_is_latched] 返回目标叶子结点以及根结点是否加锁
+ * @return [leaf node] and [root_is_latched] 返回目标叶子结点以及根结点是否加锁get_value
  * @note need to Unlatch and unpin the leaf node outside!
  * 注意：用了FindLeafPage之后一定要unlatch叶结点，否则下次latch该结点会堵塞！
  */
@@ -396,6 +396,8 @@ void IxIndexHandle::insert_into_parent(IxNodeHandle *old_node, const char *key, 
  * @return page_id_t 插入到的叶结点的page_no
  */
 page_id_t IxIndexHandle::insert_entry(const char *key, const Rid &value, Transaction *transaction) {
+    std::lock_guard<std::mutex> lock(root_latch_);
+
     auto [leaf, root_is_latched] = find_leaf_page(key, Operation::INSERT, transaction);
     if (leaf == nullptr) {
         return -1;
@@ -427,6 +429,8 @@ page_id_t IxIndexHandle::insert_entry(const char *key, const Rid &value, Transac
  * @param transaction 事务指针
  */
 bool IxIndexHandle::delete_entry(const char *key, Transaction *transaction) {
+    std::lock_guard<std::mutex> lock(root_latch_);
+
     auto [leaf, root_is_latched] = find_leaf_page(key, Operation::DELETE, transaction);
     if (leaf == nullptr) {
         return false;
