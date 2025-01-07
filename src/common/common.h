@@ -12,12 +12,13 @@ See the Mulan PSL v2 for more details. */
 
 #include <cassert>
 #include <cstring>
+#include <iostream>
 #include <memory>
 #include <string>
 #include <vector>
+
 #include "defs.h"
 #include "record/rm_defs.h"
-
 
 struct TabCol {
     std::string tab_name;
@@ -73,6 +74,67 @@ struct Value {
 };
 
 enum CompOp { OP_EQ, OP_NE, OP_LT, OP_GT, OP_LE, OP_GE };
+
+inline bool evaluate_compare(const char *lhs, ColType lhs_type, const char *rhs, ColType rhs_type, CompOp op,
+                             size_t len = sizeof(int)) {
+    switch (lhs_type) {
+        case TYPE_INT: {
+            int lhs_val = *(int *)lhs;
+            int rhs_val = *(int *)rhs;
+            switch (op) {
+                case OP_EQ:
+                    return lhs_val == rhs_val;
+                case OP_NE:
+                    return lhs_val != rhs_val;
+                case OP_LT:
+                    return lhs_val < rhs_val;
+                case OP_GT:
+                    return lhs_val > rhs_val;
+                case OP_LE:
+                    return lhs_val <= rhs_val;
+                case OP_GE:
+                    return lhs_val >= rhs_val;
+            }
+        }
+        case TYPE_FLOAT: {
+            float lhs_val = *(float *)lhs;
+            float rhs_val = *(float *)rhs;
+            switch (op) {
+                case OP_EQ:
+                    return lhs_val == rhs_val;
+                case OP_NE:
+                    return lhs_val != rhs_val;
+                case OP_LT:
+                    return lhs_val < rhs_val;
+                case OP_GT:
+                    return lhs_val > rhs_val;
+                case OP_LE:
+                    return lhs_val <= rhs_val;
+                case OP_GE:
+                    return lhs_val >= rhs_val;
+            }
+        }
+        case TYPE_STRING: {
+            int cmp = memcmp(lhs, rhs, len);
+
+            switch (op) {
+                case OP_EQ:
+                    return cmp == 0;
+                case OP_NE:
+                    return cmp != 0;
+                case OP_LT:
+                    return cmp < 0;
+                case OP_GT:
+                    return cmp > 0;
+                case OP_LE:
+                    return cmp <= 0;
+                case OP_GE:
+                    return cmp >= 0;
+            }
+        }
+    }
+    assert(false);
+}
 
 struct Condition {
     TabCol lhs_col;   // left-hand side column
