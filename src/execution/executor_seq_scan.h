@@ -56,9 +56,7 @@ class SeqScanExecutor : public AbstractExecutor {
             rid_ = scan_->rid();
             auto rec = fh_->get_record(rid_, context_);
 
-            if (evaluate_conditions(
-                    fed_conds_, cols_, rec.get(),
-                    [this](const std::vector<ColMeta> &cols, const TabCol &target) { return get_col(cols, target); })) {
+            if (evaluate_conditions(fed_conds_, cols_, rec.get())) {
                 return;
             }
 
@@ -77,9 +75,7 @@ class SeqScanExecutor : public AbstractExecutor {
             rid_ = scan_->rid();
             auto rec = fh_->get_record(rid_, context_);
 
-            if (evaluate_conditions(
-                    fed_conds_, cols_, rec.get(),
-                    [this](const std::vector<ColMeta> &cols, const TabCol &target) { return get_col(cols, target); })) {
+            if (evaluate_conditions(fed_conds_, cols_, rec.get())) {
                 return;
             }
 

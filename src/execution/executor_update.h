@@ -52,9 +52,7 @@ class UpdateExecutor : public AbstractExecutor {
             auto old_rec = fh_->get_record(rid, context_);
             auto new_rec = std::make_unique<RmRecord>(*old_rec);
 
-            if (!evaluate_conditions(
-                    conds_, tab_.cols, old_rec.get(),
-                    [this](const std::vector<ColMeta> &cols, const TabCol &target) { return get_col(cols, target); })) {
+            if (!evaluate_conditions(conds_, tab_.cols, old_rec.get())) {
                 continue;
             }
 

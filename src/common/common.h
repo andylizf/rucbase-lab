@@ -77,6 +77,7 @@ struct Value {
 
 enum CompOp { OP_EQ, OP_NE, OP_LT, OP_GT, OP_LE, OP_GE };
 
+namespace {
 inline bool evaluate_compare(const char *lhs, ColType lhs_type, const char *rhs, ColType rhs_type, CompOp op,
                              size_t len = sizeof(int)) {
     switch (lhs_type) {
@@ -137,6 +138,7 @@ inline bool evaluate_compare(const char *lhs, ColType lhs_type, const char *rhs,
     }
     assert(false);
 }
+}  // namespace
 
 struct Condition {
     TabCol lhs_col;   // left-hand side column
@@ -147,24 +149,43 @@ struct Condition {
 };
 
 inline bool evaluate_conditions(
-    const std::vector<Condition> &conditions, const std::vector<ColMeta> &cols, const RmRecord *record,
-    const std::function<std::vector<ColMeta>::const_iterator(const std::vector<ColMeta> &, const TabCol &)> &get_col) {
+    const std::vector<Condition> &conditions, const std::vector<ColMeta> &cols1, const RmRecord *record1,
+    const std::vector<ColMeta> &cols2 = std::vector<ColMeta>(), const RmRecord *record2 = nullptr,
+    const std::function<std::vector<ColMeta>::const_iterator(const std::vector<ColMeta> &, const TabCol &)> &get_col =
+        [](const std::vector<ColMeta> &cols, const TabCol &target) {
+            return std::find_if(cols.begin(), cols.end(), [&](const ColMeta &col) {
+                return col.tab_name == target.tab_name && col.name == target.col_name;
+            });
+        }) {
     for (auto &cond : conditions) {
-        auto lhs_col = get_col(cols, cond.lhs_col);
-        char *lhs_val = record->data + lhs_col->offset;
+        char *lhs_val;
         char *rhs_val;
+        ColType lhs_type;
         ColType rhs_type;
+        size_t comp_len;
 
+        // For join conditions, we need to check which table the column belongs to
+        bool is_lhs_from_first = record2 == nullptr || (cols1.size() > 0 && cond.lhs_col.tab_name == cols1[0].tab_name);
+
+        // Get left-hand side value
+        auto lhs_col = get_col(is_lhs_from_first ? cols1 : cols2, cond.lhs_col);
+        lhs_val = (is_lhs_from_first ? record1 : record2)->data + lhs_col->offset;
+        lhs_type = lhs_col->type;
+        comp_len = lhs_col->len;
+
+        // Get right-hand side value
         if (cond.is_rhs_val) {
             rhs_val = cond.rhs_val.raw->data;
             rhs_type = cond.rhs_val.type;
         } else {
-            auto rhs_col = get_col(cols, cond.rhs_col);
-            rhs_val = record->data + rhs_col->offset;
+            bool is_rhs_from_first =
+                record2 == nullptr || (cols1.size() > 0 && cond.rhs_col.tab_name == cols1[0].tab_name);
+            auto rhs_col = get_col(is_rhs_from_first ? cols1 : cols2, cond.rhs_col);
+            rhs_val = (is_rhs_from_first ? record1 : record2)->data + rhs_col->offset;
             rhs_type = rhs_col->type;
         }
 
-        if (!evaluate_compare(lhs_val, lhs_col->type, rhs_val, rhs_type, cond.op, lhs_col->len)) {
+        if (!evaluate_compare(lhs_val, lhs_type, rhs_val, rhs_type, cond.op, comp_len)) {
             return false;
         }
     }
