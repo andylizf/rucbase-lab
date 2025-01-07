@@ -12,6 +12,7 @@ See the Mulan PSL v2 for more details. */
 
 #include <cassert>
 #include <cstring>
+#include <functional>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -19,6 +20,7 @@ See the Mulan PSL v2 for more details. */
 
 #include "defs.h"
 #include "record/rm_defs.h"
+#include "system/sm_meta.h"
 
 struct TabCol {
     std::string tab_name;
@@ -143,6 +145,31 @@ struct Condition {
     TabCol rhs_col;   // right-hand side column
     Value rhs_val;    // right-hand side value
 };
+
+inline bool evaluate_conditions(
+    const std::vector<Condition> &conditions, const std::vector<ColMeta> &cols, const RmRecord *record,
+    const std::function<std::vector<ColMeta>::const_iterator(const std::vector<ColMeta> &, const TabCol &)> &get_col) {
+    for (auto &cond : conditions) {
+        auto lhs_col = get_col(cols, cond.lhs_col);
+        char *lhs_val = record->data + lhs_col->offset;
+        char *rhs_val;
+        ColType rhs_type;
+
+        if (cond.is_rhs_val) {
+            rhs_val = cond.rhs_val.raw->data;
+            rhs_type = cond.rhs_val.type;
+        } else {
+            auto rhs_col = get_col(cols, cond.rhs_col);
+            rhs_val = record->data + rhs_col->offset;
+            rhs_type = rhs_col->type;
+        }
+
+        if (!evaluate_compare(lhs_val, lhs_col->type, rhs_val, rhs_type, cond.op, lhs_col->len)) {
+            return false;
+        }
+    }
+    return true;
+}
 
 struct SetClause {
     TabCol lhs;

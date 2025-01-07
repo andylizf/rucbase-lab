@@ -30,29 +30,6 @@ class SeqScanExecutor : public AbstractExecutor {
 
     SmManager *sm_manager_;
 
-    bool check_conditions(const RmRecord *rec) {
-        for (auto &cond : fed_conds_) {
-            auto lhs_col = get_col(cols_, cond.lhs_col);
-            char *lhs_val = rec->data + lhs_col->offset;
-            char *rhs_val;
-            ColType rhs_type;
-
-            if (cond.is_rhs_val) {
-                rhs_val = cond.rhs_val.raw->data;
-                rhs_type = cond.rhs_val.type;
-            } else {
-                auto rhs_col = get_col(cols_, cond.rhs_col);
-                rhs_val = rec->data + rhs_col->offset;
-                rhs_type = rhs_col->type;
-            }
-
-            if (!evaluate_compare(lhs_val, lhs_col->type, rhs_val, rhs_type, cond.op, lhs_col->len)) {
-                return false;
-            }
-        }
-        return true;
-    }
-
    public:
     SeqScanExecutor(SmManager *sm_manager, std::string tab_name, std::vector<Condition> conds, Context *context) {
         sm_manager_ = sm_manager;
@@ -79,7 +56,9 @@ class SeqScanExecutor : public AbstractExecutor {
             rid_ = scan_->rid();
             auto rec = fh_->get_record(rid_, context_);
 
-            if (check_conditions(rec.get())) {
+            if (evaluate_conditions(
+                    fed_conds_, cols_, rec.get(),
+                    [this](const std::vector<ColMeta> &cols, const TabCol &target) { return get_col(cols, target); })) {
                 return;
             }
 
@@ -98,7 +77,9 @@ class SeqScanExecutor : public AbstractExecutor {
             rid_ = scan_->rid();
             auto rec = fh_->get_record(rid_, context_);
 
-            if (check_conditions(rec.get())) {
+            if (evaluate_conditions(
+                    fed_conds_, cols_, rec.get(),
+                    [this](const std::vector<ColMeta> &cols, const TabCol &target) { return get_col(cols, target); })) {
                 return;
             }
 
