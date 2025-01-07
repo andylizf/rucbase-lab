@@ -29,7 +29,8 @@ def run():
     os.chdir("./build")
     score = 0.0
     
-    for i in range(NUM_TESTS):
+    TESTS = list(range(NUM_TESTS))
+    for i in TESTS:
         # if i == 0 :
         #     continue
         
@@ -60,6 +61,13 @@ def run():
             ansDict[line]=num+1
         my_answer = database_name + "/output.txt"
         hand1 = open(my_answer,"r")
+
+        content = hand1.read()
+        print(f'=========={i+1} User Answer==========')
+        print(content)
+        print('========================================')
+        hand1.seek(0)
+
         for line in hand1 :
             line = line.strip('\n')
             if line == "":
@@ -71,16 +79,16 @@ def run():
             if value != 0:
                 match = False
                 if value > 0:
-                    print('In basic query test'+str(i+1),'Mismatch,your answer lack items')
+                    print('In basic query test'+str(i+1),f'Mismatch,your answer lack items {key}')
                 else :
-                    print('In basic query test'+str(i+1),'Mismatch,your answer has redundant items')
+                    print('In basic query test'+str(i+1),f'Mismatch,your answer has redundant items {key}')
         if match :
             score += SCORES[i]
         # close server
         os.system("ps -ef | grep rmdb | grep -v grep | awk '{print $2}' | xargs kill -9")
         print("finish kill")
         # delete database
-        if i < 4:
+        if i != TESTS[-1]:
             os.system("rm -rf ./" + database_name)
             print("finish delete database")
     
