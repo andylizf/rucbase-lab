@@ -17,6 +17,11 @@ See the Mulan PSL v2 for more details. */
  * @return {unique_ptr<RmRecord>} rid对应的记录对象指针
  */
 std::unique_ptr<RmRecord> RmFileHandle::get_record(const Rid& rid, Context* context) const {
+    if (context != nullptr && context->txn_ != nullptr) {
+        context->lock_mgr_->lock_IS_on_table(context->txn_, fd_);
+        context->lock_mgr_->lock_shared_on_record(context->txn_, rid, fd_);
+    }
+
     RmPageHandle page_handle = fetch_page_handle(rid.page_no);
 
     if (rid.slot_no >= file_hdr_.num_records_per_page || !Bitmap::is_set(page_handle.bitmap, rid.slot_no)) {
@@ -67,6 +72,11 @@ void RmFileHandle::insert_record(const Rid& rid, char* buf) {}
  * @param {Context*} context
  */
 void RmFileHandle::delete_record(const Rid& rid, Context* context) {
+    if (context != nullptr && context->txn_ != nullptr) {
+        context->lock_mgr_->lock_IX_on_table(context->txn_, fd_);
+        context->lock_mgr_->lock_exclusive_on_record(context->txn_, rid, fd_);
+    }
+
     RmPageHandle page_handle = fetch_page_handle(rid.page_no);
 
     if (rid.slot_no >= file_hdr_.num_records_per_page || !Bitmap::is_set(page_handle.bitmap, rid.slot_no)) {
@@ -88,6 +98,11 @@ void RmFileHandle::delete_record(const Rid& rid, Context* context) {
  * @param {Context*} context
  */
 void RmFileHandle::update_record(const Rid& rid, char* buf, Context* context) {
+    if (context != nullptr && context->txn_ != nullptr) {
+        context->lock_mgr_->lock_IX_on_table(context->txn_, fd_);
+        context->lock_mgr_->lock_exclusive_on_record(context->txn_, rid, fd_);
+    }
+
     RmPageHandle page_handle = fetch_page_handle(rid.page_no);
 
     if (rid.slot_no >= file_hdr_.num_records_per_page || !Bitmap::is_set(page_handle.bitmap, rid.slot_no)) {

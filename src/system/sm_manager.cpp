@@ -221,6 +221,10 @@ void SmManager::create_table(const std::string& tab_name, const std::vector<ColD
     // fhs_[tab_name] = rm_manager_->open_file(tab_name);
     fhs_.emplace(tab_name, rm_manager_->open_file(tab_name));
 
+    if (context != nullptr && context->txn_ != nullptr) {
+        context->lock_mgr_->lock_exclusive_on_table(context->txn_, fhs_[tab_name]->GetFd());
+    }
+
     flush_meta();
 }
 
@@ -231,6 +235,10 @@ void SmManager::create_table(const std::string& tab_name, const std::vector<ColD
  */
 void SmManager::drop_table(const std::string& tab_name, Context* context) {
     TabMeta& tab = db_.get_table(tab_name);
+
+    if (context != nullptr && context->txn_ != nullptr) {
+        context->lock_mgr_->lock_exclusive_on_table(context->txn_, fhs_[tab_name]->GetFd());
+    }
 
     // Drop all indexes on this table
     for (auto& col : tab.cols) {
@@ -268,6 +276,10 @@ void SmManager::drop_table(const std::string& tab_name, Context* context) {
 void SmManager::create_index(const std::string& tab_name, const std::vector<std::string>& col_names, Context* context) {
     TabMeta& tab = db_.get_table(tab_name);
 
+    if (context != nullptr && context->txn_ != nullptr) {
+        context->lock_mgr_->lock_IX_on_table(context->txn_, fhs_[tab_name]->GetFd());
+    }
+
     std::vector<ColMeta> cols;
     int col_tot_len = 0;
     for (const auto& col_name : col_names) {
@@ -284,11 +296,13 @@ void SmManager::create_index(const std::string& tab_name, const std::vector<std:
     tab.indexes.push_back(index);
 
     ix_manager_->create_index(tab_name, cols);
-
     std::unique_ptr<IxIndexHandle> ih(ix_manager_->open_index(tab_name, cols));
     auto file_handle = fhs_.at(tab_name).get();
 
     for (RmScan scan(file_handle); !scan.is_end(); scan.next()) {
+        if (context != nullptr && context->txn_ != nullptr) {
+            context->lock_mgr_->lock_shared_on_record(context->txn_, scan.rid(), fhs_[tab_name]->GetFd());
+        }
         auto rec = file_handle->get_record(scan.rid(), context);
         char* key = new char[col_tot_len];
         int offset = 0;
@@ -328,6 +342,10 @@ void SmManager::drop_index(const std::string& tab_name, const std::vector<std::s
     TabMeta& tab = db_.get_table(tab_name);
     std::vector<ColMeta> cols;
 
+    if (context != nullptr && context->txn_ != nullptr) {
+        context->lock_mgr_->lock_IX_on_table(context->txn_, fhs_[tab_name]->GetFd());
+    }
+
     // Get column metadata
     for (const auto& col_name : col_names) {
         auto col = tab.get_col(col_name);
@@ -348,6 +366,10 @@ void SmManager::drop_index(const std::string& tab_name, const std::vector<std::s
  */
 void SmManager::drop_index(const std::string& tab_name, const std::vector<ColMeta>& cols, Context* context) {
     TabMeta& tab = db_.get_table(tab_name);
+
+    if (context != nullptr && context->txn_ != nullptr) {
+        context->lock_mgr_->lock_IX_on_table(context->txn_, fhs_[tab_name]->GetFd());
+    }
 
     // Remove index handle and close file
     std::string index_name = tab_name;
