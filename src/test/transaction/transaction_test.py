@@ -1,6 +1,7 @@
 import os;
 import time;
 import subprocess
+import sys
 
 NUM_TESTS = 2
 
@@ -27,12 +28,12 @@ def build():
     os.system("make transaction_test -j4")
     os.chdir("..")
 
-def run():
+def run(tests):
     os.chdir("./build")
     score = 0.0
     comment_str = "\n"
 
-    for test_case in TESTS:
+    for test_case in tests:
         print("-----------Transaction Testing " + test_case + "...-----------")
         test_file = get_test_name(test_case)
         database_name = "transaction_test_db"
@@ -109,10 +110,11 @@ def run():
         for failed_test in FAILED_TESTS:
             print("[" + failed_test + "]  "),
     else:
-        print("You have passed all basic test cases about transaction!")
-        print("\033[0;31;40mTransaction Test Final Score:" + str(score)+ "\033[0m")
+        print(f"You have passed {len(TESTS)} basic test cases about transaction! They are {','.join(tests)}")
+        print(f"\033[0;31;40mTransaction Test Final Score: {score}\033[0m")
     print(comment_str)
 
 if __name__ == "__main__":
     build()
-    run()
+    tests = sys.argv[1:] if len(sys.argv) > 1 else TESTS
+    run(tests)
