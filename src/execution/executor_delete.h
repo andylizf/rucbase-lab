@@ -40,6 +40,12 @@ class DeleteExecutor : public AbstractExecutor {
         for (const auto &rid : rids_) {
             auto rec = fh_->get_record(rid, context_);
 
+            // Add to write set before actual deletion
+            if (context_->txn_ != nullptr) {
+                WriteRecord *write_record = new WriteRecord(WType::DELETE_TUPLE, tab_name_, rid, *rec.get());
+                context_->txn_->append_write_record(write_record);
+            }
+
             // Delete from indexes
             for (size_t i = 0; i < tab_.cols.size(); i++) {
                 auto &col = tab_.cols[i];

@@ -107,6 +107,13 @@ class UpdateExecutor : public AbstractExecutor {
 
         // Then update all indexes and records
         for (size_t j = 0; j < rids_to_update.size(); j++) {
+            // Add to write set before actual update
+            if (context_->txn_ != nullptr) {
+                WriteRecord *write_record =
+                    new WriteRecord(WType::UPDATE_TUPLE, tab_name_, rids_to_update[j], *old_recs[j].get());
+                context_->txn_->append_write_record(write_record);
+            }
+
             // Update indexes
             for (size_t i = 0; i < tab_.cols.size(); i++) {
                 auto &col = tab_.cols[i];
