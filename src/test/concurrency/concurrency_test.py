@@ -1,5 +1,6 @@
 import os;
 import time;
+import sys;
 
 NUM_TESTS = 10
 
@@ -38,13 +39,13 @@ def build():
     os.system("make concurrency_test -j4")
     os.chdir("..")
 
-def run():
+def run(tests):
     os.chdir("./build")
     score = 0.0
     index = -1
     comment_str = "\n"
 
-    for test_case in TESTS:
+    for test_case in tests:
         print("-----------Concurrency Testing " + test_case + "...-----------")
         test_file = get_test_name(test_case)
         database_name = "concurrency_test_db"
@@ -120,4 +121,5 @@ def run():
 
 if __name__ == "__main__":
     build()
-    run()
+    tests = sys.argv[1:] if len(sys.argv) > 1 else TESTS
+    run(tests)
