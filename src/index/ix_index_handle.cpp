@@ -681,19 +681,11 @@ Iid IxIndexHandle::upper_bound(const char *key) {
     }
 
     int slot_no = leaf->upper_bound(key);
-    if (slot_no == leaf->get_size() && leaf->get_page_no() != file_hdr_->last_leaf_) {
-        // Move to next leaf if we've reached the end of current leaf
-        page_id_t next_page_no = leaf->get_next_leaf();
-        buffer_pool_manager_->unpin_page(leaf->get_page_id(), false);
-        leaf = fetch_node(next_page_no);
-        if (leaf->get_size() == 0) {
-            buffer_pool_manager_->unpin_page(leaf->get_page_id(), false);
-            return Iid{-1, -1};
-        }
-        slot_no = 0;
+    Iid iid = {.page_no = leaf->get_page_no(), .slot_no = slot_no};
+    if (slot_no == leaf->get_size()) {
+        iid = {.page_no = leaf->get_next_leaf(), .slot_no = 0};
     }
 
-    Iid iid = {.page_no = leaf->get_page_no(), .slot_no = slot_no};
     buffer_pool_manager_->unpin_page(leaf->get_page_id(), false);
     return iid;
 }
