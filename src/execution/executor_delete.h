@@ -47,16 +47,22 @@ class DeleteExecutor : public AbstractExecutor {
             }
 
             // Delete from indexes
-            for (size_t i = 0; i < tab_.cols.size(); i++) {
-                auto &col = tab_.cols[i];
-                if (col.index) {
-                    // Get index handle
-                    std::vector<std::string> index_cols = {col.name};
-                    auto ih = sm_manager_->ihs_.at(sm_manager_->get_ix_manager()->get_index_name(tab_name_, index_cols))
-                                  .get();
-                    // Delete entry
-                    ih->delete_entry(rec->data + col.offset, context_->txn_);
+            for (size_t i = 0; i < tab_.indexes.size(); ++i) {
+                auto &index = tab_.indexes[i];
+                std::vector<std::string> index_cols;
+                for (auto &col : index.cols) {
+                    index_cols.push_back(col.name);
                 }
+                auto ih =
+                    sm_manager_->ihs_.at(sm_manager_->get_ix_manager()->get_index_name(tab_name_, index_cols)).get();
+                char *key = new char[index.col_tot_len];
+                int offset = 0;
+                for (size_t i = 0; i < index.col_num; ++i) {
+                    memcpy(key + offset, rec->data + index.cols[i].offset, index.cols[i].len);
+                    offset += index.cols[i].len;
+                }
+                ih->delete_entry(key, context_->txn_);
+                delete[] key;
             }
 
             // Delete from table file

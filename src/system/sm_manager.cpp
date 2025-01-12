@@ -100,11 +100,9 @@ void SmManager::open_db(const std::string& db_name) {
         auto& tab = entry.second;
         fhs_.emplace(tab.name, rm_manager_->open_file(tab.name));
 
-        for (auto& col : tab.cols) {
-            if (col.index) {
-                std::vector<ColMeta> index_cols = {col};
-                ihs_.emplace(tab.name + "." + col.name, ix_manager_->open_index(tab.name, index_cols));
-            }
+        for (auto& index : tab.indexes) {
+            std::string index_name = ix_manager_->get_index_name(tab.name, index.cols);
+            ihs_.emplace(index_name, ix_manager_->open_index(tab.name, index.cols));
         }
     }
 }
@@ -314,10 +312,7 @@ void SmManager::create_index(const std::string& tab_name, const std::vector<std:
         delete[] key;
     }
 
-    std::string index_name = tab_name;
-    for (const auto& col : cols) {
-        index_name += "." + col.name;
-    }
+    std::string index_name = ix_manager_->get_index_name(tab_name, cols);
     ihs_.emplace(index_name, std::move(ih));
 
     for (auto& col : tab.cols) {
@@ -372,14 +367,11 @@ void SmManager::drop_index(const std::string& tab_name, const std::vector<ColMet
     }
 
     // Remove index handle and close file
-    std::string index_name = tab_name;
-    for (const auto& col : cols) {
-        index_name += "." + col.name;
-        auto ih = ihs_.find(index_name);
-        if (ih != ihs_.end()) {
-            ix_manager_->close_index(ih->second.get());
-            ihs_.erase(ih);
-        }
+    std::string index_name = ix_manager_->get_index_name(tab_name, cols);
+    auto ih = ihs_.find(index_name);
+    if (ih != ihs_.end()) {
+        ix_manager_->close_index(ih->second.get());
+        ihs_.erase(ih);
     }
 
     // Destroy index file
