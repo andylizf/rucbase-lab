@@ -683,7 +683,7 @@ Iid IxIndexHandle::upper_bound(const char *key) {
     int slot_no = leaf->upper_bound(key);
     Iid iid = {.page_no = leaf->get_page_no(), .slot_no = slot_no};
     if (slot_no == leaf->get_size()) {
-        iid = {.page_no = leaf->get_next_leaf(), .slot_no = 0};
+        return leaf_end();
     }
 
     buffer_pool_manager_->unpin_page(leaf->get_page_id(), false);
