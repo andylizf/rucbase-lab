@@ -321,3 +321,64 @@ bool LockManager::unlock(Transaction* txn, LockDataId lock_data_id) {
 
     return false;
 }
+
+bool LockManager::lock_gap(Transaction* txn, const std::string& left_key, const std::string& right_key, int table_id) {
+    if (txn->get_state() == TransactionState::SHRINKING) {
+        throw TransactionAbortException(txn->get_transaction_id(), AbortReason::LOCK_ON_SHIRINKING);
+    }
+
+    std::unique_lock<std::mutex> lock(gap_latch_);
+
+    for (const auto& entry : gap_lock_table_) {
+        const auto& existing_range = entry.first;
+        const auto& existing_queue = entry.second;
+
+        if (existing_range.table_id != table_id) {
+            continue;
+        }
+        bool has_overlap = false;
+
+        if (left_key.size() == existing_range.left_key.size() && right_key.size() == existing_range.right_key.size()) {
+            has_overlap = !(memcmp(right_key.data(), existing_range.left_key.data(), right_key.size()) <= 0 ||
+                            memcmp(left_key.data(), existing_range.right_key.data(), left_key.size()) >= 0);
+        }
+
+        if (has_overlap) {
+            for (const auto& req : existing_queue.request_queue) {
+                if (req.granted && req.txn_id != txn->get_transaction_id()) {
+                    throw TransactionAbortException(txn->get_transaction_id(), AbortReason::DEADLOCK_PREVENTION);
+                }
+            }
+        }
+    }
+
+    GapLockRange range{left_key, right_key, table_id};
+    auto& lock_queue = gap_lock_table_[range];
+    lock_queue.request_queue.push_back(GapLockRequest(txn->get_transaction_id()));
+    lock_queue.request_queue.back().granted = true;
+
+    txn->get_gap_lock_set()->insert(GapLockId(left_key, right_key, table_id));
+
+    return true;
+}
+
+bool LockManager::unlock_gap(Transaction* txn, const std::string& left_key, const std::string& right_key,
+                             int table_id) {
+    GapLockRange range{left_key, right_key, table_id};
+
+    std::unique_lock<std::mutex> lock(gap_latch_);
+
+    auto it = gap_lock_table_.find(range);
+    if (it == gap_lock_table_.end()) {
+        return true;
+    }
+
+    auto& lock_queue = it->second;
+
+    lock_queue.request_queue.remove_if(
+        [txn_id = txn->get_transaction_id()](const GapLockRequest& req) { return req.txn_id == txn_id; });
+
+    txn->get_gap_lock_set()->erase(GapLockId(left_key, right_key, table_id));
+
+    return true;
+}

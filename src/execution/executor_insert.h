@@ -17,11 +17,11 @@ See the Mulan PSL v2 for more details. */
 
 class InsertExecutor : public AbstractExecutor {
    private:
-    TabMeta tab_;                   // 表的元数据
-    std::vector<Value> values_;     // 需要插入的数据
-    RmFileHandle *fh_;              // 表的数据文件句柄
-    std::string tab_name_;          // 表名称
-    Rid rid_;                       // 插入的位置，由于系统默认插入时不指定位置，因此当前rid_在插入后才赋值
+    TabMeta tab_;                // 表的元数据
+    std::vector<Value> values_;  // 需要插入的数据
+    RmFileHandle *fh_;           // 表的数据文件句柄
+    std::string tab_name_;       // 表名称
+    Rid rid_;                    // 插入的位置，由于系统默认插入时不指定位置，因此当前rid_在插入后才赋值
     SmManager *sm_manager_;
 
    public:
@@ -68,7 +68,35 @@ class InsertExecutor : public AbstractExecutor {
                 memcpy(key + offset, rec.data + index.cols[i].offset, index.cols[i].len);
                 offset += index.cols[i].len;
             }
+
+            std::string key_str(key, index.col_tot_len);
+            std::string prev_key(key_str);
+            std::string next_key(key_str);
+
+            if (!prev_key.empty()) {
+                unsigned char *last_byte = reinterpret_cast<unsigned char *>(&prev_key[prev_key.length() - 1]);
+                if (*last_byte > 0) {
+                    (*last_byte)--;
+                }
+            }
+
+            if (!next_key.empty()) {
+                unsigned char *last_byte = reinterpret_cast<unsigned char *>(&next_key[next_key.length() - 1]);
+                if (*last_byte < 255) {
+                    (*last_byte)++;
+                }
+            }
+
+            bool lock_result = context_->lock_mgr_->lock_gap(context_->txn_, prev_key, next_key, fh_->GetFd());
+            if (!lock_result) {
+                delete[] key;
+                throw TransactionAbortException(context_->txn_->get_transaction_id(), AbortReason::LOCK_ON_SHIRINKING);
+            }
+
             ih->insert_entry(key, rid_, context_->txn_);
+
+            context_->lock_mgr_->unlock_gap(context_->txn_, prev_key, next_key, fh_->GetFd());
+
             delete[] key;
         }
         return nullptr;

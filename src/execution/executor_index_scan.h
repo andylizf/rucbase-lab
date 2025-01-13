@@ -10,6 +10,7 @@ See the Mulan PSL v2 for more details. */
 
 #pragma once
 
+#include "defs.h"
 #include "execution_defs.h"
 #include "execution_manager.h"
 #include "executor_abstract.h"
@@ -30,39 +31,53 @@ class IndexScanExecutor : public AbstractExecutor {
     IndexMeta index_meta_;                      // index scan涉及到的索引元数据
 
     Rid rid_;
-    std::unique_ptr<IxScan> scan_;
-    std::unique_ptr<IxIndexHandle> ih_;
+    std::unique_ptr<RecScan> scan_;
 
     SmManager *sm_manager_;
 
     bool satisfy_conditions(const RmRecord *rec) { return evaluate_conditions(fed_conds_, cols_, rec); }
 
     // Helper function to build index key from conditions
-    std::unique_ptr<char[]> build_key_from_conditions(const std::vector<Condition> &conds) {
-        auto key = std::make_unique<char[]>(index_meta_.col_tot_len);
+    std::pair<std::unique_ptr<char[]>, std::unique_ptr<char[]>> build_key_range_from_conditions(
+        const std::vector<Condition> &conds) {
+        auto lower_key = std::make_unique<char[]>(index_meta_.col_tot_len);
+        auto upper_key = std::make_unique<char[]>(index_meta_.col_tot_len);
         int offset = 0;
 
         for (size_t i = 0; i < index_meta_.col_num; i++) {
             const auto &index_col = index_meta_.cols[i];
-            bool found = false;
+            bool found_eq = false;
+            bool found_lower = false;
+            bool found_upper = false;
+
+            memset(lower_key.get() + offset, 0, index_col.len);
+            memset(upper_key.get() + offset, 0xFF, index_col.len);
 
             for (const auto &cond : conds) {
-                if (cond.lhs_col.col_name == index_col.name && cond.op == OP_EQ) {
-                    memcpy(key.get() + offset, cond.rhs_val.raw->data, index_col.len);
-                    found = true;
-                    break;
+                if (cond.lhs_col.col_name == index_col.name) {
+                    if (cond.op == OP_EQ) {
+                        memcpy(lower_key.get() + offset, cond.rhs_val.raw->data, index_col.len);
+                        memcpy(upper_key.get() + offset, cond.rhs_val.raw->data, index_col.len);
+                        found_eq = true;
+                        break;
+                    } else if (cond.op == OP_LT || cond.op == OP_LE) {
+                        memcpy(upper_key.get() + offset, cond.rhs_val.raw->data, index_col.len);
+                        found_upper = true;
+                    } else if (cond.op == OP_GT || cond.op == OP_GE) {
+                        memcpy(lower_key.get() + offset, cond.rhs_val.raw->data, index_col.len);
+                        found_lower = true;
+                    }
                 }
             }
 
-            if (!found) {
-                // If no matching condition found, we can't use further columns
-                return nullptr;
+            if (!found_eq && !found_lower && !found_upper && i > 0) {
+                break;
             }
 
             offset += index_col.len;
         }
 
-        return key;
+        return {std::move(lower_key), std::move(upper_key)};
     }
 
    public:
@@ -92,31 +107,39 @@ class IndexScanExecutor : public AbstractExecutor {
             }
         }
         fed_conds_ = conds_;
-
-        ih_ =
-            std::move(sm_manager_->ihs_.at(sm_manager_->get_ix_manager()->get_index_name(tab_name_, index_col_names_)));
     }
 
     void beginTuple() override {
-        auto key = build_key_from_conditions(fed_conds_);
-        if (key == nullptr) {  // If we can't build a key, start from beginning
-            scan_ = std::make_unique<IxScan>(ih_.get(), ih_->leaf_begin(), ih_->leaf_end(), sm_manager_->get_bpm());
+        auto [lower_key, upper_key] = build_key_range_from_conditions(fed_conds_);
+        auto ih_ =
+            sm_manager_->ihs_.at(sm_manager_->get_ix_manager()->get_index_name(tab_name_, index_col_names_)).get();
 
-            while (!scan_->is_end()) {
-                rid_ = scan_->rid();
-                auto rec = fh_->get_record(rid_, context_);
-                if (satisfy_conditions(rec.get())) {
-                    return;
-                }
-                scan_->next();
+        if (lower_key != nullptr && upper_key != nullptr) {
+            Iid lower = ih_->lower_bound(lower_key.get());
+            Iid upper = ih_->upper_bound(upper_key.get());
+
+            scan_ = std::make_unique<IxScan>(ih_, lower, upper, sm_manager_->get_bpm());
+
+            std::string lower_key_str(lower_key.get(), index_meta_.col_tot_len);
+            std::string upper_key_str(upper_key.get(), index_meta_.col_tot_len);
+
+            bool lock_result =
+                context_->lock_mgr_->lock_gap(context_->txn_, lower_key_str, upper_key_str, fh_->GetFd());
+            if (!lock_result) {
+                throw TransactionAbortException(context_->txn_->get_transaction_id(), AbortReason::LOCK_ON_SHIRINKING);
             }
-            return;
+        } else {
+            scan_ = std::make_unique<IxScan>(ih_, ih_->leaf_begin(), ih_->leaf_end(), sm_manager_->get_bpm());
+
+            std::string min_key(index_meta_.col_tot_len, 0);
+            std::string max_key(index_meta_.col_tot_len, 0);
+            memset(const_cast<char *>(max_key.data()), 0xFF, index_meta_.col_tot_len);
+
+            bool lock_result = context_->lock_mgr_->lock_gap(context_->txn_, min_key, max_key, fh_->GetFd());
+            if (!lock_result) {
+                throw TransactionAbortException(context_->txn_->get_transaction_id(), AbortReason::LOCK_ON_SHIRINKING);
+            }
         }
-
-        Iid lower = ih_->lower_bound(key.get());
-        Iid upper = ih_->upper_bound(key.get());
-
-        scan_ = std::make_unique<IxScan>(ih_.get(), lower, upper, sm_manager_->get_bpm());
 
         while (!scan_->is_end()) {
             rid_ = scan_->rid();

@@ -52,6 +52,41 @@ class SeqScanExecutor : public AbstractExecutor {
     void beginTuple() override {
         scan_ = std::make_unique<RmScan>(fh_);
 
+        TabMeta &tab = sm_manager_->db_.get_table(tab_name_);
+        if (!tab.indexes.empty()) {
+            auto &index = tab.indexes[0];
+            std::string min_key(index.col_tot_len, 0);
+            std::string max_key(index.col_tot_len, 0);
+            memset(const_cast<char *>(max_key.data()), 0xFF, index.col_tot_len);
+
+            bool has_range = false;
+            for (const auto &cond : fed_conds_) {
+                if (cond.lhs_col.col_name == index.cols[0].name) {
+                    char *key_data = new char[index.col_tot_len];
+                    memset(key_data, 0, index.col_tot_len);
+                    memcpy(key_data, cond.rhs_val.raw->data, sizeof(int));
+
+                    if (cond.op == OP_GT || cond.op == OP_GE) {
+                        min_key = std::string(key_data, index.col_tot_len);
+                        has_range = true;
+                    } else if (cond.op == OP_LT || cond.op == OP_LE) {
+                        max_key = std::string(key_data, index.col_tot_len);
+                        has_range = true;
+                    }
+                    delete[] key_data;
+                }
+            }
+
+            if (!has_range) {
+                memset(const_cast<char *>(max_key.data()), 0xFF, index.col_tot_len);
+            }
+
+            bool lock_result = context_->lock_mgr_->lock_gap(context_->txn_, min_key, max_key, fh_->GetFd());
+            if (!lock_result) {
+                throw TransactionAbortException(context_->txn_->get_transaction_id(), AbortReason::LOCK_ON_SHIRINKING);
+            }
+        }
+
         while (!scan_->is_end()) {
             rid_ = scan_->rid();
             auto rec = fh_->get_record(rid_, context_);

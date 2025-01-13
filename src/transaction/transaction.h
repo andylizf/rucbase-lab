@@ -12,9 +12,9 @@ See the Mulan PSL v2 for more details. */
 
 #include <atomic>
 #include <deque>
+#include <memory>
 #include <string>
 #include <thread>
-#include <memory>
 #include <unordered_set>
 
 #include "txn_defs.h"
@@ -26,7 +26,8 @@ class Transaction {
         write_set_ = std::make_shared<std::deque<WriteRecord *>>();
         lock_set_ = std::make_shared<std::unordered_set<LockDataId>>();
         index_latch_page_set_ = std::make_shared<std::deque<Page *>>();
-        index_deleted_page_set_ = std::make_shared<std::deque<Page*>>();
+        index_deleted_page_set_ = std::make_shared<std::deque<Page *>>();
+        gap_lock_set_ = std::make_shared<std::unordered_set<GapLockId>>();
         prev_lsn_ = INVALID_LSN;
         thread_id_ = std::this_thread::get_id();
     }
@@ -51,16 +52,18 @@ class Transaction {
     inline lsn_t get_prev_lsn() { return prev_lsn_; }
     inline void set_prev_lsn(lsn_t prev_lsn) { prev_lsn_ = prev_lsn; }
 
-    inline std::shared_ptr<std::deque<WriteRecord *>> get_write_set() { return write_set_; }  
-    inline void append_write_record(WriteRecord* write_record) { write_set_->push_back(write_record); }
+    inline std::shared_ptr<std::deque<WriteRecord *>> get_write_set() { return write_set_; }
+    inline void append_write_record(WriteRecord *write_record) { write_set_->push_back(write_record); }
 
-    inline std::shared_ptr<std::deque<Page*>> get_index_deleted_page_set() { return index_deleted_page_set_; }
-    inline void append_index_deleted_page(Page* page) { index_deleted_page_set_->push_back(page); }
+    inline std::shared_ptr<std::deque<Page *>> get_index_deleted_page_set() { return index_deleted_page_set_; }
+    inline void append_index_deleted_page(Page *page) { index_deleted_page_set_->push_back(page); }
 
-    inline std::shared_ptr<std::deque<Page*>> get_index_latch_page_set() { return index_latch_page_set_; }
-    inline void append_index_latch_page_set(Page* page) { index_latch_page_set_->push_back(page); }
+    inline std::shared_ptr<std::deque<Page *>> get_index_latch_page_set() { return index_latch_page_set_; }
+    inline void append_index_latch_page_set(Page *page) { index_latch_page_set_->push_back(page); }
 
     inline std::shared_ptr<std::unordered_set<LockDataId>> get_lock_set() { return lock_set_; }
+
+    inline std::shared_ptr<std::unordered_set<GapLockId>> get_gap_lock_set() { return gap_lock_set_; }
 
    private:
     bool txn_mode_;                   // 用于标识当前事务为显式事务还是单条SQL语句的隐式事务
@@ -71,8 +74,9 @@ class Transaction {
     txn_id_t txn_id_;                 // 事务的ID，唯一标识符
     timestamp_t start_ts_;            // 事务的开始时间戳
 
-    std::shared_ptr<std::deque<WriteRecord *>> write_set_;  // 事务包含的所有写操作
-    std::shared_ptr<std::unordered_set<LockDataId>> lock_set_;  // 事务申请的所有锁
-    std::shared_ptr<std::deque<Page*>> index_latch_page_set_;          // 维护事务执行过程中加锁的索引页面
-    std::shared_ptr<std::deque<Page*>> index_deleted_page_set_;    // 维护事务执行过程中删除的索引页面
+    std::shared_ptr<std::deque<WriteRecord *>> write_set_;         // 事务包含的所有写操作
+    std::shared_ptr<std::unordered_set<LockDataId>> lock_set_;     // 事务申请的所有锁
+    std::shared_ptr<std::deque<Page *>> index_latch_page_set_;     // 维护事务执行过程中加锁的索引页面
+    std::shared_ptr<std::deque<Page *>> index_deleted_page_set_;   // 维护事务执行过程中删除的索引页面
+    std::shared_ptr<std::unordered_set<GapLockId>> gap_lock_set_;  // 事务持有的gap locks
 };

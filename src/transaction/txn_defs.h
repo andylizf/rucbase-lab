@@ -23,7 +23,7 @@ enum class TransactionState { DEFAULT, GROWING, SHRINKING, COMMITTED, ABORTED };
 enum class IsolationLevel { READ_UNCOMMITTED, REPEATABLE_READ, READ_COMMITTED, SERIALIZABLE };
 
 /* 事务写操作类型，包括插入、删除、更新三种操作 */
-enum class WType { INSERT_TUPLE = 0, DELETE_TUPLE, UPDATE_TUPLE};
+enum class WType { INSERT_TUPLE = 0, DELETE_TUPLE, UPDATE_TUPLE };
 
 /**
  * @brief 事务的写操作记录，用于事务的回滚
@@ -114,6 +114,31 @@ class LockDataId {
 template <>
 struct std::hash<LockDataId> {
     size_t operator()(const LockDataId &obj) const { return std::hash<int64_t>()(obj.Get()); }
+};
+
+/**
+ * @description: Unique identifier for gap locks
+ */
+class GapLockId {
+   public:
+    GapLockId(const std::string &left_key, const std::string &right_key, int table_id)
+        : left_key(left_key), right_key(right_key), table_id(table_id) {}
+
+    bool operator==(const GapLockId &other) const {
+        return left_key == other.left_key && right_key == other.right_key && table_id == other.table_id;
+    }
+
+    std::string left_key;
+    std::string right_key;
+    int table_id;
+};
+
+template <>
+struct std::hash<GapLockId> {
+    size_t operator()(const GapLockId &obj) const {
+        return std::hash<std::string>()(obj.left_key) ^ std::hash<std::string>()(obj.right_key) ^
+               std::hash<int>()(obj.table_id);
+    }
 };
 
 /* 事务回滚原因 */

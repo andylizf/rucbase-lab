@@ -44,6 +44,14 @@ Transaction* TransactionManager::begin(Transaction* txn, LogManager* log_manager
  * @param {LogManager*} log_manager 日志管理器指针
  */
 void TransactionManager::commit(Transaction* txn, LogManager* log_manager) {
+    // 释放所有gap locks
+    auto gap_lock_set = txn->get_gap_lock_set();
+    for (const auto& gap_lock : *gap_lock_set) {
+        lock_manager_->unlock_gap(txn, gap_lock.left_key, gap_lock.right_key, gap_lock.table_id);
+    }
+    gap_lock_set->clear();
+
+    // 释放所有record locks
     auto lock_set = txn->get_lock_set();
     for (auto lock_id : *lock_set) {
         lock_manager_->unlock(txn, lock_id);
@@ -94,6 +102,14 @@ void TransactionManager::abort(Transaction* txn, LogManager* log_manager) {
         delete write_record;
     }
 
+    // 释放所有gap locks
+    auto gap_lock_set = txn->get_gap_lock_set();
+    for (const auto& gap_lock : *gap_lock_set) {
+        lock_manager_->unlock_gap(txn, gap_lock.left_key, gap_lock.right_key, gap_lock.table_id);
+    }
+    gap_lock_set->clear();
+
+    // 释放所有record locks
     auto lock_set = txn->get_lock_set();
     for (auto lock_id : *lock_set) {
         lock_manager_->unlock(txn, lock_id);
