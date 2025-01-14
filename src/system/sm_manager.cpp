@@ -243,7 +243,7 @@ void SmManager::drop_table(const std::string& tab_name, Context* context) {
         if (col.index) {
             std::vector<ColMeta> index_cols = {col};
             // First close the index file
-            std::string index_name = tab_name + "." + col.name;
+            std::string index_name = ix_manager_->get_index_name(tab_name, index_cols);
             auto ih = ihs_.find(index_name);
             if (ih != ihs_.end()) {
                 ix_manager_->close_index(ih->second.get());
